@@ -1,6 +1,7 @@
 package com.emailtodb.emailtodb.services;
 
 import com.emailtodb.emailtodb.entities.EmailMessage;
+import com.emailtodb.emailtodb.enums.EmailProvider;
 import com.emailtodb.emailtodb.repositories.EmailMessageRepository;
 import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePartHeader;
@@ -29,6 +30,16 @@ public class EmailSaveService {
 
     @Transactional
     public void saveEmailMessageAndItsAttachmentsIfNotExists(Message message, EmailMessage emailMessage) {
+        saveEmailMessageAndItsAttachmentsIfNotExists(emailMessage, message, null);
+    }
+
+    @Transactional
+    public void saveEmailMessageAndItsAttachmentsIfNotExists(EmailMessage emailMessage) {
+        saveEmailMessageAndItsAttachmentsIfNotExists(emailMessage, null, null);
+    }
+
+    @Transactional
+    private void saveEmailMessageAndItsAttachmentsIfNotExists(EmailMessage emailMessage, Message gmailMessage, com.microsoft.graph.models.Message outlookMessage) {
 
         Optional<EmailMessage> existingEmailMessage = emailMessageRepository.findByMessageId(emailMessage.getMessageId());
 
@@ -43,7 +54,13 @@ public class EmailSaveService {
             logger.info("Saved email message");
 
             try {
-                emailAttachmentSaveService.saveEmailAttachmentsIfNotExists(message, emailMessage);
+                if (gmailMessage != null) {
+                    // Handle Gmail attachments
+                    emailAttachmentSaveService.saveEmailAttachmentsIfNotExists(gmailMessage, emailMessage);
+                } else if (outlookMessage != null) {
+                    // Handle Outlook attachments
+                    emailAttachmentSaveService.saveOutlookEmailAttachmentsIfNotExists(outlookMessage, emailMessage);
+                }
             } catch (Exception e) {
                 logger.error("Error while saving email attachments: {}", e.getMessage());
                 logger.error("Rolling back transaction");
@@ -136,5 +153,109 @@ public class EmailSaveService {
         return emailMessage;
     }
 
+    /**
+     * Extract email message from Microsoft Graph Outlook message
+     * @param outlookMessage The Outlook message
+     * @return EmailMessage entity
+     */
+    public EmailMessage extractEmailMessageFromOutlookMessage(com.microsoft.graph.models.Message outlookMessage) {
+        EmailMessage emailMessage = new EmailMessage();
+        
+        try {
+            // Set basic properties
+            emailMessage.setMessageId(outlookMessage.id);
+            
+            // Clean subject (remove Re:, Fwd:, etc.)
+            String subject = outlookMessage.subject != null ? outlookMessage.subject : "";
+            String regex = "^(?i)((Fwd:|Re:|Fw:)\\s*)+";
+            subject = subject.replaceAll(regex, "");
+            emailMessage.setSubject(subject);
+            
+            // Set sender information
+            String fromEmail = "";
+            if (outlookMessage.from != null && outlookMessage.from.emailAddress != null) {
+                fromEmail = outlookMessage.from.emailAddress.address != null ? 
+                        outlookMessage.from.emailAddress.address : "";
+                if (outlookMessage.from.emailAddress.name != null) {
+                    fromEmail = outlookMessage.from.emailAddress.name + " <" + fromEmail + ">";
+                }
+            }
+            emailMessage.setFrom(fromEmail);
+            
+            // Set recipient information
+            StringBuilder toEmails = new StringBuilder();
+            if (outlookMessage.toRecipients != null) {
+                for (int i = 0; i < outlookMessage.toRecipients.size(); i++) {
+                    if (i > 0) toEmails.append(", ");
+                    var recipient = outlookMessage.toRecipients.get(i);
+                    if (recipient.emailAddress != null && recipient.emailAddress.address != null) {
+                        toEmails.append(recipient.emailAddress.address);
+                    }
+                }
+            }
+            emailMessage.setTo(toEmails.toString());
+            
+            // Set CC recipients
+            StringBuilder ccEmails = new StringBuilder();
+            if (outlookMessage.ccRecipients != null) {
+                for (int i = 0; i < outlookMessage.ccRecipients.size(); i++) {
+                    if (i > 0) ccEmails.append(", ");
+                    var recipient = outlookMessage.ccRecipients.get(i);
+                    if (recipient.emailAddress != null && recipient.emailAddress.address != null) {
+                        ccEmails.append(recipient.emailAddress.address);
+                    }
+                }
+            }
+            emailMessage.setCc(ccEmails.toString());
+            
+            // Set BCC recipients
+            StringBuilder bccEmails = new StringBuilder();
+            if (outlookMessage.bccRecipients != null) {
+                for (int i = 0; i < outlookMessage.bccRecipients.size(); i++) {
+                    if (i > 0) bccEmails.append(", ");
+                    var recipient = outlookMessage.bccRecipients.get(i);
+                    if (recipient.emailAddress != null && recipient.emailAddress.address != null) {
+                        bccEmails.append(recipient.emailAddress.address);
+                    }
+                }
+            }
+            emailMessage.setBcc(bccEmails.toString());
+            
+            // Set date received
+            if (outlookMessage.receivedDateTime != null) {
+                emailMessage.setDateReceived(Date.from(outlookMessage.receivedDateTime.toInstant()));
+            } else {
+                emailMessage.setDateReceived(new Date());
+            }
+            
+            // Set email body
+            String body = "";
+            String briefBody = "";
+            
+            if (outlookMessage.body != null) {
+                body = outlookMessage.body.content != null ? outlookMessage.body.content : "";
+                
+                // Create a brief version by removing HTML tags and truncating
+                briefBody = body.replaceAll("<[^>]*>", "").trim();
+                if (briefBody.length() > 500) {
+                    briefBody = briefBody.substring(0, 500) + "...";
+                }
+            }
+            
+            emailMessage.setBody(body);
+            emailMessage.setBriefBody(briefBody);
+            
+            // Set email provider
+            emailMessage.setEmailProvider(EmailProvider.OUTLOOK);
+            
+            logger.info("Extracted Outlook email message details for: {}", subject);
+            
+        } catch (Exception e) {
+            logger.error("Error extracting Outlook email message details: {}", e.getMessage());
+            throw new RuntimeException("Failed to extract Outlook email message", e);
+        }
+        
+        return emailMessage;
+    }
 
 }
