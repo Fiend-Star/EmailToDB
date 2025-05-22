@@ -1,6 +1,7 @@
 package com.emailtodb.emailtodb.entities;
 
 
+import com.emailtodb.emailtodb.enums.EmailProvider;
 import jakarta.persistence.*;
 import lombok.Data;
 import java.util.Date;
@@ -50,4 +51,8 @@ public class EmailMessage {
 
     @Column(name = "status_migrate", nullable = false)
     private boolean statusMigrate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "email_provider", nullable = false)
+    private EmailProvider emailProvider;
 }

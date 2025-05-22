@@ -1,22 +1,31 @@
 package com.emailtodb.emailtodb.services;
 
+import com.emailtodb.emailtodb.entities.EmailMessage;
+import com.emailtodb.emailtodb.enums.EmailProvider;
+import com.emailtodb.emailtodb.services.interfaces.EmailFetchServiceInterface;
 import com.google.api.services.gmail.Gmail;
-import com.google.api.services.gmail.model.ListMessagesResponse;
 import com.google.api.services.gmail.model.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.text.SimpleDateFormat;
 import java.util.*;
 
+/**
+ * Coordinator service for fetching emails from multiple providers (Gmail and Outlook)
+ */
 @Service
 public class EmailFetchService {
 
     private static final Logger logger = LoggerFactory.getLogger(EmailFetchService.class);
 
-    private static final String USER_ID = "me";
+    @Autowired
+    private GmailEmailFetchService gmailEmailFetchService;
+
+    @Autowired
+    private OutlookEmailFetchService outlookEmailFetchService;
 
     public List<Message> fetchMessages(Gmail service) {
         logger.info("Fetching messages started");

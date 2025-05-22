@@ -1,13 +1,16 @@
 package com.emailtodb.emailtodb.services;
 
 import com.emailtodb.emailtodb.entities.EmailMessage;
+import com.emailtodb.emailtodb.enums.EmailProvider;
 import com.emailtodb.emailtodb.repositories.EmailMessageRepository;
+import com.emailtodb.emailtodb.services.interfaces.EmailAttachmentFetchServiceInterface;
 import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePartHeader;
 import jakarta.transaction.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.text.ParseException;
@@ -29,6 +32,16 @@ public class EmailSaveService {
 
     @Transactional
     public void saveEmailMessageAndItsAttachmentsIfNotExists(Message message, EmailMessage emailMessage) {
+        saveEmailMessageAndItsAttachmentsIfNotExists(emailMessage, message, null);
+    }
+
+    @Transactional
+    public void saveEmailMessageAndItsAttachmentsIfNotExists(EmailMessage emailMessage) {
+        saveEmailMessageAndItsAttachmentsIfNotExists(emailMessage, null, null);
+    }
+
+    @Transactional
+    private void saveEmailMessageAndItsAttachmentsIfNotExists(EmailMessage emailMessage, Message gmailMessage, com.microsoft.graph.models.Message outlookMessage) {
 
         Optional<EmailMessage> existingEmailMessage = emailMessageRepository.findByMessageId(emailMessage.getMessageId());
 
@@ -43,7 +56,13 @@ public class EmailSaveService {
             logger.info("Saved email message");
 
             try {
-                emailAttachmentSaveService.saveEmailAttachmentsIfNotExists(message, emailMessage);
+                if (gmailMessage != null) {
+                    // Handle Gmail attachments
+                    emailAttachmentSaveService.saveEmailAttachmentsIfNotExists(gmailMessage, emailMessage);
+                } else if (outlookMessage != null) {
+                    // Handle Outlook attachments
+                    emailAttachmentSaveService.saveOutlookEmailAttachmentsIfNotExists(outlookMessage, emailMessage);
+                }
             } catch (Exception e) {
                 logger.error("Error while saving email attachments: {}", e.getMessage());
                 logger.error("Rolling back transaction");

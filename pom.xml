@@ -167,6 +167,26 @@
             <artifactId>azure-storage-file-datalake</artifactId>
         </dependency>
 
+        <!-- Microsoft Graph SDK for Java -->
+        <dependency>
+            <groupId>com.microsoft.graph</groupId>
+            <artifactId>microsoft-graph</artifactId>
+            <version>5.76.0</version>
+        </dependency>
+
+        <!-- Microsoft Graph Auth Provider -->
+        <dependency>
+            <groupId>com.microsoft.graph</groupId>
+            <artifactId>microsoft-graph-auth</artifactId>
+            <version>0.4.0</version>
+        </dependency>
+
+        <!-- Azure Identity for authentication -->
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-identity</artifactId>
+        </dependency>
+
     </dependencies>
 
     <dependencyManagement>
