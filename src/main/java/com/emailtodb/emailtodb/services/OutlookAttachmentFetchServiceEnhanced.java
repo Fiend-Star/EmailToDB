@@ -4,9 +4,8 @@ import com.emailtodb.emailtodb.config.OutlookConfig;
 import com.emailtodb.emailtodb.entities.EmailAttachment;
 import com.emailtodb.emailtodb.entities.EmailMessage;
 import com.emailtodb.emailtodb.repositories.EmailAttachmentRepository;
-import com.emailtodb.emailtodb.services.OutlookErrorHandlingService.ErrorInfo;
+import com.emailtodb.emailtodb.services.OutlookExceptionHandler.ErrorInfo;
 import com.microsoft.graph.models.Attachment;
-import com.microsoft.graph.models.AttachmentCollectionPage;
 import com.microsoft.graph.models.FileAttachment;
 import com.microsoft.graph.requests.GraphServiceClient;
 import okhttp3.Request;
@@ -25,6 +24,7 @@ import java.util.List;
 
 /**
  * Service for fetching email attachments from Microsoft Outlook using Microsoft Graph API
+ * With enhanced error handling and retry capabilities
  */
 @Service
 public class OutlookAttachmentFetchService {
@@ -36,6 +36,9 @@ public class OutlookAttachmentFetchService {
 
     @Autowired
     private EmailAttachmentRepository emailAttachmentRepository;
+    
+    @Autowired
+    private OutlookExceptionHandler exceptionHandler;
 
     private static final String UNKNOWN = "unknown";
 
@@ -47,6 +50,9 @@ public class OutlookAttachmentFetchService {
      * @throws IOException if fetching fails
      * @throws NoSuchAlgorithmException if hashing fails
      */
+    @Retryable(value = {IOException.class}, 
+               maxAttempts = 3, 
+               backoff = @Backoff(delay = 1000, multiplier = 2))
     public List<EmailAttachment> getAttachments(String messageId, EmailMessage emailMessage) 
             throws IOException, NoSuchAlgorithmException {
         
@@ -64,7 +70,7 @@ public class OutlookAttachmentFetchService {
             }
 
             // Fetch attachments for the message
-            AttachmentCollectionPage attachmentPage = graphClient.users(userEmail)
+            var attachmentPage = graphClient.users(userEmail)
                     .messages(messageId)
                     .attachments()
                     .buildRequest()
@@ -73,14 +79,20 @@ public class OutlookAttachmentFetchService {
             if (attachmentPage != null && attachmentPage.getCurrentPage() != null) {
                 for (Attachment attachment : attachmentPage.getCurrentPage()) {
                     if (attachment instanceof FileAttachment) {
-                        FileAttachment fileAttachment = (FileAttachment) attachment;
-                        EmailAttachment emailAttachment = createEmailAttachment(fileAttachment, emailMessage);
-                        
-                        if (isNewAttachment(emailAttachment.getFileContentHash())) {
-                            attachments.add(emailAttachment);
-                            logger.info("Outlook attachment added: {}", emailAttachment.getFileName());
-                        } else {
-                            logger.info("Outlook attachment already exists: {}", emailAttachment.getFileName());
+                        try {
+                            FileAttachment fileAttachment = (FileAttachment) attachment;
+                            EmailAttachment emailAttachment = createEmailAttachment(fileAttachment, emailMessage);
+                            
+                            if (isNewAttachment(emailAttachment.getFileContentHash())) {
+                                attachments.add(emailAttachment);
+                                logger.info("Outlook attachment added: {}", emailAttachment.getFileName());
+                            } else {
+                                logger.info("Outlook attachment already exists: {}", emailAttachment.getFileName());
+                            }
+                        } catch (Exception e) {
+                            ErrorInfo errorInfo = exceptionHandler.handleOutlookException(e);
+                            logger.warn("Error processing individual attachment: {} - {}", 
+                                    errorInfo.getErrorType(), errorInfo.getErrorMessage());
                         }
                     }
                 }
@@ -89,8 +101,10 @@ public class OutlookAttachmentFetchService {
             logger.info("Getting Outlook attachments completed: {} attachments", attachments.size());
 
         } catch (Exception e) {
-            logger.error("Error getting Outlook attachments for message {}: {}", messageId, e.getMessage(), e);
-            throw new IOException("Failed to get Outlook attachments", e);
+            ErrorInfo errorInfo = exceptionHandler.handleOutlookException(e);
+            logger.error("Error getting Outlook attachments for message {}: {} - {}", 
+                    messageId, errorInfo.getErrorType(), errorInfo.getErrorMessage(), e);
+            throw new IOException("Failed to get Outlook attachments: " + errorInfo.getErrorMessage(), e);
         }
 
         return attachments;
@@ -112,6 +126,7 @@ public class OutlookAttachmentFetchService {
         byte[] fileContent = fileAttachment.contentBytes;
         if (fileContent == null) {
             fileContent = new byte[0];
+            logger.warn("Attachment '{}' has no content bytes", fileAttachment.name);
         }
         
         attachment.setFileContent(fileContent);
@@ -132,6 +147,7 @@ public class OutlookAttachmentFetchService {
         if (fileAttachment.name != null && !fileAttachment.name.isEmpty()) {
             return fileAttachment.name;
         }
+        logger.debug("Attachment name is missing, using 'unknown'");
         return UNKNOWN;
     }
 
@@ -145,6 +161,7 @@ public class OutlookAttachmentFetchService {
         if (fileName != null && fileName.contains(".")) {
             return fileName.substring(fileName.lastIndexOf(".") + 1);
         }
+        logger.debug("Could not determine file extension for '{}', using 'unknown'", fileName);
         return UNKNOWN;
     }
 

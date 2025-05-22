@@ -25,6 +25,9 @@ public class EmailAttachmentSaveService {
 
     @Autowired
     private EmailAttachmentFetchService emailAttachmentFetchService;
+    
+    @Autowired
+    private OutlookAttachmentFetchService outlookAttachmentFetchService;
 
     @Autowired
     private AzureFileStorageService azureFileStorageService;
@@ -66,5 +69,50 @@ public class EmailAttachmentSaveService {
         }
     }
 
-
+    @Transactional
+    public void saveOutlookEmailAttachmentsIfNotExists(com.microsoft.graph.models.Message outlookMessage, EmailMessage emailMessage) 
+            throws NoSuchAlgorithmException, IOException {
+        
+        logger.info("Saving Outlook email attachments for message ID: {}", emailMessage.getMessageId());
+        
+        try {
+            List<EmailAttachment> attachments = outlookAttachmentFetchService.getAttachments(
+                    emailMessage.getMessageId(), emailMessage);
+            
+            logger.info("Outlook email has {} attachments", attachments.size());
+            
+            // Process each attachment
+            for (EmailAttachment attachment : attachments) {
+                Optional<EmailAttachment> existingEmailAttachment = 
+                        emailAttachmentRepository.findByFileContentHash(attachment.getFileContentHash());
+                
+                if (existingEmailAttachment.isEmpty()) {
+                    try {
+                        // Upload to Azure storage
+                        EmailAttachment uploadedAttachment = azureFileStorageService.uploadFile(attachment);
+                        
+                        if (uploadedAttachment != null) {
+                            logger.info("Saving new Outlook email attachment with hash: {}", 
+                                    attachment.getFileContentHash());
+                            emailAttachmentRepository.save(attachment);
+                        } else {
+                            logger.error("Error uploading Outlook attachment to Azure Blob Storage");
+                            throw new RuntimeException("Error uploading Outlook file to Azure Blob Storage: " 
+                                    + attachment.getFileContentHash());
+                        }
+                    } catch (Exception e) {
+                        logger.error("Error uploading Outlook file to Azure Blob Storage: {}", e.getMessage());
+                        throw e; // Re-throw to trigger transaction rollback
+                    }
+                    logger.info("Saved new Outlook email attachment: {}", attachment.getFileName());
+                } else {
+                    logger.info("Outlook attachment with hash {} already exists, skipping save.", 
+                            attachment.getFileContentHash());
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to save Outlook attachments: {}", e.getMessage());
+            throw e;
+        }
+    }
 }

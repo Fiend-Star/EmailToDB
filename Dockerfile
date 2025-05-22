@@ -34,6 +34,17 @@ ENV emailUser=${EMAIL_USER}
 ENV emailSummaryCC=${EMAIL_SUMMARY_CC}
 ENV emailSummaryTo=${EMAIL_SUMMARY_TO}
 
+# Outlook environment variables
+ENV outlookClientId=${OUTLOOK_CLIENT_ID:-}
+ENV outlookClientSecret=${OUTLOOK_CLIENT_SECRET:-}
+ENV outlookTenantId=${OUTLOOK_TENANT_ID:-}
+ENV outlookUserEmail=${OUTLOOK_USER_EMAIL:-}
+
+# Email provider configuration
+ENV emailProvidersEnabled=${EMAIL_PROVIDERS_ENABLED:-gmail}
+ENV multiProviderEnabled=${MULTI_PROVIDER_ENABLED:-false}
+ENV emailFetchCron=${EMAIL_FETCH_CRON:-0 */15 * * * *}
+
 # Expose ports
 EXPOSE 9091
 

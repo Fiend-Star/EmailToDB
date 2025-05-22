@@ -171,4 +171,24 @@ public class GmailEmailFetchService implements EmailFetchServiceInterface {
     public List<Message> fetchMessagesSince(Gmail service, String userId, Date sinceDate) throws IOException {
         return fetchMessagesSinceInternal(service, userId, sinceDate);
     }
+
+    /**
+     * Fetch a Gmail message by ID
+     * @param messageId The message ID
+     * @return Gmail Message object or null if not found
+     */
+    public Message getMessageById(String messageId) {
+        try {
+            Gmail service = gmailConfig.getGmailServiceAccount();
+            if (service == null) {
+                logger.error("Gmail service is null");
+                return null;
+            }
+            
+            return service.users().messages().get(USER_ID, messageId).execute();
+        } catch (Exception e) {
+            logger.error("Error fetching Gmail message by ID {}: {}", messageId, e.getMessage());
+            return null;
+        }
+    }
 }

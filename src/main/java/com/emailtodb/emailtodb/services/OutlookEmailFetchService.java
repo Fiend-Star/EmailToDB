@@ -3,15 +3,18 @@ package com.emailtodb.emailtodb.services;
 import com.emailtodb.emailtodb.config.OutlookConfig;
 import com.emailtodb.emailtodb.entities.EmailMessage;
 import com.emailtodb.emailtodb.enums.EmailProvider;
+import com.emailtodb.emailtodb.services.OutlookExceptionHandler.ErrorInfo;
 import com.emailtodb.emailtodb.services.interfaces.EmailFetchServiceInterface;
 import com.microsoft.graph.models.Message;
 import com.microsoft.graph.models.MessageCollectionPage;
-import com.microsoft.graph.models.MessageCollectionResponse;
 import com.microsoft.graph.requests.GraphServiceClient;
 import okhttp3.Request;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -33,8 +36,20 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
 
     @Autowired
     private OutlookConfig outlookConfig;
+    
+    @Autowired
+    private OutlookExceptionHandler exceptionHandler;
+    
+    @Value("${outlook.retry.maxAttempts:3}")
+    private int maxRetryAttempts;
+    
+    @Value("${outlook.retry.initialBackoffMs:1000}")
+    private long initialBackoffMs;
 
     @Override
+    @Retryable(value = {IOException.class}, 
+               maxAttempts = 3, 
+               backoff = @Backoff(delay = 1000, multiplier = 2))
     public List<Object> fetchMessages() throws IOException {
         logger.info("Fetching all Outlook messages started");
 
@@ -61,9 +76,24 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
 
                 // Handle pagination
                 while (messagesPage.getNextPage() != null) {
-                    messagesPage = messagesPage.getNextPage().buildRequest().get();
-                    if (messagesPage.getCurrentPage() != null) {
-                        messages.addAll(messagesPage.getCurrentPage());
+                    try {
+                        messagesPage = messagesPage.getNextPage().buildRequest().get();
+                        if (messagesPage.getCurrentPage() != null) {
+                            messages.addAll(messagesPage.getCurrentPage());
+                        }
+                    } catch (Exception e) {
+                        OutlookErrorHandlingService.ErrorInfo errorInfo = errorHandlingService.handleOutlookException(e);
+                        logger.warn("Error fetching next page: {} - {}", errorInfo.getErrorType(), errorInfo.getErrorMessage());
+                        
+                        // If rate limited, stop fetching more pages
+                        if (errorHandlingService.isRateLimitExceeded(e)) {
+                            logger.warn("API rate limit exceeded, stopping further requests");
+                            break;
+                        }
+                        // If it's an authentication error, rethrow to trigger retry
+                        if (errorHandlingService.isAuthenticationError(e)) {
+                            throw new IOException("Authentication error fetching Outlook messages", e);
+                        }
                     }
                 }
             }
@@ -71,8 +101,10 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
             logger.info("Fetched {} Outlook messages", messages.size());
 
         } catch (Exception e) {
-            logger.error("An error occurred while fetching Outlook messages: {}", e.getMessage(), e);
-            throw new IOException("Failed to fetch Outlook messages", e);
+            OutlookErrorHandlingService.ErrorInfo errorInfo = errorHandlingService.handleOutlookException(e);
+            logger.error("An error occurred while fetching Outlook messages: {} - {}", 
+                    errorInfo.getErrorType(), errorInfo.getErrorMessage(), e);
+            throw new IOException("Failed to fetch Outlook messages: " + errorInfo.getErrorMessage(), e);
         }
 
         logger.info("Fetching Outlook messages completed");
@@ -80,6 +112,9 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
     }
 
     @Override
+    @Retryable(value = {IOException.class}, 
+               maxAttempts = 3, 
+               backoff = @Backoff(delay = 1000, multiplier = 2))
     public List<Object> fetchMessagesSince(Date sinceDate) throws IOException {
         logger.info("Fetching Outlook messages since {}", sinceDate);
 
@@ -103,6 +138,8 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
 
             // Build the filter query
             String filter = String.format("receivedDateTime ge %s", formattedDate);
+            
+            logger.debug("Using Outlook filter query: {}", filter);
 
             // Fetch messages with date filter
             MessageCollectionPage messagesPage = graphClient.users(userEmail)
@@ -119,9 +156,25 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
 
                 // Handle pagination
                 while (messagesPage.getNextPage() != null) {
-                    messagesPage = messagesPage.getNextPage().buildRequest().get();
-                    if (messagesPage.getCurrentPage() != null) {
-                        messages.addAll(messagesPage.getCurrentPage());
+                    try {
+                        messagesPage = messagesPage.getNextPage().buildRequest().get();
+                        if (messagesPage.getCurrentPage() != null) {
+                            messages.addAll(messagesPage.getCurrentPage());
+                        }
+                    } catch (Exception e) {
+                        OutlookErrorHandlingService.ErrorInfo errorInfo = errorHandlingService.handleOutlookException(e);
+                        logger.warn("Error fetching next page since {}: {} - {}", 
+                                sinceDate, errorInfo.getErrorType(), errorInfo.getErrorMessage());
+                        
+                        // If rate limited, stop fetching more pages
+                        if (errorHandlingService.isRateLimitExceeded(e)) {
+                            logger.warn("API rate limit exceeded, stopping further requests");
+                            break;
+                        }
+                        // If it's an authentication error, rethrow to trigger retry
+                        if (errorHandlingService.isAuthenticationError(e)) {
+                            throw new IOException("Authentication error fetching Outlook messages", e);
+                        }
                     }
                 }
             }
@@ -129,8 +182,10 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
             logger.info("Fetched {} Outlook messages since {}", messages.size(), sinceDate);
 
         } catch (Exception e) {
-            logger.error("An error occurred while fetching Outlook messages since {}: {}", sinceDate, e.getMessage(), e);
-            throw new IOException("Failed to fetch Outlook messages since date", e);
+            OutlookErrorHandlingService.ErrorInfo errorInfo = errorHandlingService.handleOutlookException(e);
+            logger.error("An error occurred while fetching Outlook messages since {}: {} - {}", 
+                    sinceDate, errorInfo.getErrorType(), errorInfo.getErrorMessage(), e);
+            throw new IOException("Failed to fetch Outlook messages since date: " + errorInfo.getErrorMessage(), e);
         }
 
         return messages;
