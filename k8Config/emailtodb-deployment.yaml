@@ -2,22 +2,75 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: emailtodb
+  labels:
+    app: emailtodb
+    version: "1.0"
 spec:
   replicas: 3
   selector:
     matchLabels:
       app: emailtodb
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
   template:
     metadata:
       labels:
         app: emailtodb
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: "9091"
     spec:
       containers:
       - name: emailtodb
         image: emailtodb:latest
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
         ports:
-        - containerPort: 9091
+        - name: http
+          containerPort: 9091
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: http
+          initialDelaySeconds: 90
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: http
+          initialDelaySeconds: 45
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 2
+        startupProbe:
+          httpGet:
+            path: /actuator/health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sh", "-c", "sleep 10"]
         env:
+        - name: JAVA_OPTS
+          value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
+        - name: SPRING_PROFILES_ACTIVE
+          value: "production"
         - name: dbHost
           value: ${DB_HOST}
         - name: dbUser
@@ -34,3 +87,22 @@ spec:
           value: ${EMAIL_SUMMARY_CC}
         - name: emailSummaryTo
           value: ${EMAIL_SUMMARY_TO}
+        # Outlook-specific environment variables
+        - name: outlookClientId
+          value: ${OUTLOOK_CLIENT_ID}
+        - name: outlookClientSecret
+          value: ${OUTLOOK_CLIENT_SECRET}
+        - name: outlookTenantId
+          value: ${OUTLOOK_TENANT_ID}
+        - name: outlookUserEmail
+          value: ${OUTLOOK_USER_EMAIL}
+        - name: outlookConnectionTimeout
+          value: "${OUTLOOK_CONNECTION_TIMEOUT:30}"
+        - name: outlookReadTimeout
+          value: "${OUTLOOK_READ_TIMEOUT:60}"
+        - name: outlookRetryMaxAttempts
+          value: "${OUTLOOK_RETRY_MAX_ATTEMPTS:3}"
+        - name: emailProvidersEnabled
+          value: "${EMAIL_PROVIDERS_ENABLED:gmail,outlook-enhanced}"
+        - name: multiProviderEnabled
+          value: "${MULTI_PROVIDER_ENABLED:true}"

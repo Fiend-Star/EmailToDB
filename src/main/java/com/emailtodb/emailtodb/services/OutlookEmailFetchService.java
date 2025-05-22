@@ -6,7 +6,8 @@ import com.emailtodb.emailtodb.enums.EmailProvider;
 import com.emailtodb.emailtodb.services.OutlookExceptionHandler.ErrorInfo;
 import com.emailtodb.emailtodb.services.interfaces.EmailFetchServiceInterface;
 import com.microsoft.graph.models.Message;
-import com.microsoft.graph.models.MessageCollectionPage;
+import com.microsoft.graph.options.Option;
+import com.microsoft.graph.options.QueryOption;
 import com.microsoft.graph.requests.GraphServiceClient;
 import okhttp3.Request;
 import org.slf4j.Logger;
@@ -24,6 +25,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.LinkedList;
 import java.util.TimeZone;
 
 /**
@@ -64,34 +66,34 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
             }
 
             // Fetch messages from inbox
-            MessageCollectionPage messagesPage = graphClient.users(userEmail)
+            List<Option> options = new LinkedList<>();
+            var inboxMessages = graphClient.users(userEmail)
                     .mailFolders("inbox")
                     .messages()
-                    .buildRequest()
+                    .buildRequest(options)
                     .get();
 
-            if (messagesPage != null) {
-                List<Message> currentPageMessages = messagesPage.getCurrentPage();
-                messages.addAll(currentPageMessages);
+            if (inboxMessages != null) {
+                messages.addAll(inboxMessages.getCurrentPage());
 
                 // Handle pagination
-                while (messagesPage.getNextPage() != null) {
+                while (inboxMessages.getNextPage() != null) {
                     try {
-                        messagesPage = messagesPage.getNextPage().buildRequest().get();
-                        if (messagesPage.getCurrentPage() != null) {
-                            messages.addAll(messagesPage.getCurrentPage());
+                        inboxMessages = inboxMessages.getNextPage().buildRequest().get();
+                        if (inboxMessages.getCurrentPage() != null) {
+                            messages.addAll(inboxMessages.getCurrentPage());
                         }
                     } catch (Exception e) {
-                        OutlookErrorHandlingService.ErrorInfo errorInfo = errorHandlingService.handleOutlookException(e);
+                        ErrorInfo errorInfo = exceptionHandler.handleOutlookException(e);
                         logger.warn("Error fetching next page: {} - {}", errorInfo.getErrorType(), errorInfo.getErrorMessage());
                         
                         // If rate limited, stop fetching more pages
-                        if (errorHandlingService.isRateLimitExceeded(e)) {
+                        if (exceptionHandler.isRateLimitExceeded(e)) {
                             logger.warn("API rate limit exceeded, stopping further requests");
                             break;
                         }
                         // If it's an authentication error, rethrow to trigger retry
-                        if (errorHandlingService.isAuthenticationError(e)) {
+                        if (exceptionHandler.isAuthenticationError(e)) {
                             throw new IOException("Authentication error fetching Outlook messages", e);
                         }
                     }
@@ -101,7 +103,7 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
             logger.info("Fetched {} Outlook messages", messages.size());
 
         } catch (Exception e) {
-            OutlookErrorHandlingService.ErrorInfo errorInfo = errorHandlingService.handleOutlookException(e);
+            ErrorInfo errorInfo = exceptionHandler.handleOutlookException(e);
             logger.error("An error occurred while fetching Outlook messages: {} - {}", 
                     errorInfo.getErrorType(), errorInfo.getErrorMessage(), e);
             throw new IOException("Failed to fetch Outlook messages: " + errorInfo.getErrorMessage(), e);
@@ -142,17 +144,18 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
             logger.debug("Using Outlook filter query: {}", filter);
 
             // Fetch messages with date filter
-            MessageCollectionPage messagesPage = graphClient.users(userEmail)
+            List<Option> options = new LinkedList<>();
+            options.add(new QueryOption("$filter", filter));
+            options.add(new QueryOption("$orderby", "receivedDateTime desc"));
+            
+            var messagesPage = graphClient.users(userEmail)
                     .mailFolders("inbox")
                     .messages()
-                    .buildRequest()
-                    .filter(filter)
-                    .orderBy("receivedDateTime desc")
+                    .buildRequest(options)
                     .get();
 
             if (messagesPage != null) {
-                List<Message> currentPageMessages = messagesPage.getCurrentPage();
-                messages.addAll(currentPageMessages);
+                messages.addAll(messagesPage.getCurrentPage());
 
                 // Handle pagination
                 while (messagesPage.getNextPage() != null) {
@@ -162,17 +165,17 @@ public class OutlookEmailFetchService implements EmailFetchServiceInterface {
                             messages.addAll(messagesPage.getCurrentPage());
                         }
                     } catch (Exception e) {
-                        OutlookErrorHandlingService.ErrorInfo errorInfo = errorHandlingService.handleOutlookException(e);
+                        ErrorInfo errorInfo = exceptionHandler.handleOutlookException(e);
                         logger.warn("Error fetching next page since {}: {} - {}", 
                                 sinceDate, errorInfo.getErrorType(), errorInfo.getErrorMessage());
                         
                         // If rate limited, stop fetching more pages
-                        if (errorHandlingService.isRateLimitExceeded(e)) {
+                        if (exceptionHandler.isRateLimitExceeded(e)) {
                             logger.warn("API rate limit exceeded, stopping further requests");
                             break;
                         }
                         // If it's an authentication error, rethrow to trigger retry
-                        if (errorHandlingService.isAuthenticationError(e)) {
+                        if (exceptionHandler.isAuthenticationError(e)) {
                             throw new IOException("Authentication error fetching Outlook messages", e);
                         }
                     }

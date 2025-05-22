@@ -1,13 +1,18 @@
 package com.emailtodb.emailtodb.entities;
 
-
 import com.emailtodb.emailtodb.enums.EmailProvider;
 import jakarta.persistence.*;
 import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 import java.util.Date;
 import java.util.List;
 
-@Data
+/**
+ * Entity representing an email message
+ */
+@Getter
+@Setter
 @Entity
 @Table(name = "email_messages")
 public class EmailMessage {
@@ -55,4 +60,19 @@ public class EmailMessage {
     @Enumerated(EnumType.STRING)
     @Column(name = "email_provider", nullable = false)
     private EmailProvider emailProvider;
+    
+    // Default constructor for JPA
+    public EmailMessage() {
+    }
+    
+    // Constructor with essential fields
+    public EmailMessage(String messageId, String subject, String from, String to, Date dateReceived) {
+        this.messageId = messageId;
+        this.subject = subject;
+        this.from = from;
+        this.to = to;
+        this.dateReceived = dateReceived;
+        this.statusUploadStaging = false;
+        this.statusMigrate = false;
+    }
 }

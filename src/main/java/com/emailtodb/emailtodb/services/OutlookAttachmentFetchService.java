@@ -4,9 +4,9 @@ import com.emailtodb.emailtodb.config.OutlookConfig;
 import com.emailtodb.emailtodb.entities.EmailAttachment;
 import com.emailtodb.emailtodb.entities.EmailMessage;
 import com.emailtodb.emailtodb.repositories.EmailAttachmentRepository;
-import com.emailtodb.emailtodb.services.OutlookErrorHandlingService.ErrorInfo;
+import com.emailtodb.emailtodb.services.OutlookExceptionHandler.ErrorInfo;
+import com.emailtodb.emailtodb.services.interfaces.EmailAttachmentFetchServiceInterface;
 import com.microsoft.graph.models.Attachment;
-import com.microsoft.graph.models.AttachmentCollectionPage;
 import com.microsoft.graph.models.FileAttachment;
 import com.microsoft.graph.requests.GraphServiceClient;
 import okhttp3.Request;
@@ -26,8 +26,8 @@ import java.util.List;
 /**
  * Service for fetching email attachments from Microsoft Outlook using Microsoft Graph API
  */
-@Service
-public class OutlookAttachmentFetchService {
+@Service("outlookAttachmentFetchService")
+public class OutlookAttachmentFetchService implements EmailAttachmentFetchServiceInterface {
 
     private static final Logger logger = LoggerFactory.getLogger(OutlookAttachmentFetchService.class);
 
@@ -38,6 +38,22 @@ public class OutlookAttachmentFetchService {
     private EmailAttachmentRepository emailAttachmentRepository;
 
     private static final String UNKNOWN = "unknown";
+
+    @Override
+    public List<EmailAttachment> getAttachments(Object messageObject, EmailMessage emailMessage) 
+            throws IOException, NoSuchAlgorithmException {
+        if (messageObject instanceof String) {
+            return getAttachments((String) messageObject, emailMessage);
+        } else {
+            logger.error("Unsupported message object type: {}", messageObject.getClass().getName());
+            throw new IllegalArgumentException("Outlook attachment service requires a String messageId");
+        }
+    }
+    
+    @Override
+    public String getProviderName() {
+        return "outlook";
+    }
 
     /**
      * Get attachments from an Outlook message
@@ -64,7 +80,7 @@ public class OutlookAttachmentFetchService {
             }
 
             // Fetch attachments for the message
-            AttachmentCollectionPage attachmentPage = graphClient.users(userEmail)
+            var attachmentPage = graphClient.users(userEmail)
                     .messages(messageId)
                     .attachments()
                     .buildRequest()

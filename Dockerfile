@@ -1,5 +1,5 @@
 # Stage 1: Build with Maven
-FROM maven:3.8.4-openjdk-17 as builder
+FROM maven:3.9.6-eclipse-temurin-21 as builder
 
 # Copy your project's source code into the Docker image
 COPY . /usr/src/myapp
@@ -14,7 +14,7 @@ WORKDIR /usr/src/myapp
 RUN mvn clean install -DskipTests
 
 # Stage 2: Setup the runtime environment
-FROM openjdk:17
+FROM eclipse-temurin:21-jre-jammy
 
 # Copy the JAR file from the builder stage
 COPY --from=builder /usr/src/myapp/target/EmailToDb-0.0.1-SNAPSHOT.jar /usr/app/EmailToDb.jar
